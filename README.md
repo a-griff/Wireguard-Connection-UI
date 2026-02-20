@@ -1,4 +1,4 @@
-![WireGuard UI Screenshot](wg-ui_logo.png)
+<img src="wg-ui_logo.png" width="50%">
 
 # WireGuard Connection UI
 
