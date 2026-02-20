@@ -1,13 +1,16 @@
-<img src="wg-ui_logo.png" width="50%"><img src="wg-ui_screenshot.png" width="25%">
+<img src="wg-ui_logo.png" width="50%">
 
 # WireGuard Connection UI
 
-GTK-based multi-connection WireGuard manager.
+GTK-based multi-connection WireGuard manager<br>
+Version 2.1
 
-Version: 2.1 baseline
+<img src="wg-ui_screenshot.png" width="25%">
+
+
 
 FILE LIST:<br>
-wg-ui.pl - the actual program.<br>
-wg-ui-help.txt - the help file
+wg-ui.pl - The actual program.<br>
+wg-ui-help.txt - The help file
 
-USAGE: read the wg-ui-help.txt
+INSTALL & USAGE: Read the wg-ui-help.txt
