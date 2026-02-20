@@ -1,0 +1,127 @@
+============================================================
+WireGuard GTK UI
+Version 2.1
+============================================================
+
+OVERVIEW
+--------
+This program provides a graphical interface for managing
+multiple WireGuard (.conf) files located in:
+
+    /etc/wireguard
+
+The available WireGuard connection list shown in the GUI
+is automatically generated from any files matching:
+
+    wg*.conf
+
+found in:
+
+    /etc/wireguard
+
+Each matching .conf file becomes an independent
+WireGuard interface.
+
+If you add or remove wg*.conf files, restart the program
+to refresh the list.
+
+
+============================================================
+USAGE
+============================================================
+
+Start the program:
+
+    ~/bin/wg-ui.pl
+
+Enter your sudo password when prompted.
+
+For each profile:
+
+- CONNECT starts that tunnel
+- DISCONNECT stops that tunnel
+- Profile name is GREEN if active
+- Profile name is RED if inactive
+
+GLOBAL DISCONNECT stops ALL active WireGuard interfaces.
+
+
+============================================================
+INSTALLATION
+============================================================
+
+1) Dependencies
+
+You must have:
+
+- perl
+- libgtk3-perl (GTK3 bindings)
+- wireguard-tools
+- iproute2
+
+Debian/Ubuntu:
+
+    sudo apt install perl libgtk3-perl wireguard wireguard-tools
+
+Slackware:
+
+    slackpkg install perl gtk+3 wireguard-tools
+
+
+2) Script Placement
+
+Place the following files in:
+
+    ~/bin
+
+Files:
+    wg-ui.pl
+    wg-ui-help.txt
+
+Make executable:
+
+    chmod +x ~/bin/wg-ui.pl
+
+
+3) Sudo Requirements (MINIMAL)
+
+Edit sudoers safely using:
+
+    sudo visudo
+
+Add:
+
+    youruser ALL=(root) /usr/bin/wg, /usr/bin/wg-quick, /bin/ls /etc/wireguard
+
+This allows:
+- Viewing active WireGuard interfaces
+- Bringing tunnels up
+- Bringing tunnels down
+- Listing configuration files in /etc/wireguard
+
+For security, do NOT use:
+
+    youruser ALL=(root) ALL
+
+Do NOT use NOPASSWD if you want a password prompt.
+
+
+============================================================
+SECURITY NOTE
+============================================================
+
+This program executes:
+
+    sudo wg
+    sudo wg-quick up <profile>
+    sudo wg-quick down <profile>
+
+Ensure you trust the configuration files in:
+
+    /etc/wireguard
+
+Private keys remain protected by system permissions.
+
+============================================================
+END
+============================================================
