@@ -5,6 +5,118 @@ use Gtk3 -init;
 use Glib qw/TRUE FALSE/;
 
 our @profiles;
+our %widgets;
+our %CMD;
+
+# ============================================================
+# COMMAND DETECTION
+# ============================================================
+
+sub find_cmd {
+    my ($cmd) = @_;
+
+    my @paths = split(/:/, $ENV{PATH} || '');
+    push @paths, qw(
+        /bin
+        /usr/bin
+        /sbin
+        /usr/sbin
+        /usr/local/bin
+        /usr/local/sbin
+    );
+
+    my %seen;
+
+    foreach my $dir (@paths) {
+        next if !$dir;
+        next if $seen{$dir}++;
+
+        my $full = "$dir/$cmd";
+        return $full if -x $full;
+    }
+
+    return undef;
+}
+
+sub detect_commands {
+    my @required = qw(sudo ls wg wg-quick);
+    my @missing;
+
+    foreach my $cmd (@required) {
+        my $path = find_cmd($cmd);
+
+        if ($path) {
+            $CMD{$cmd} = $path;
+        } else {
+            push @missing, $cmd;
+        }
+    }
+
+    if (@missing) {
+        show_error_and_exit(
+            "Required command(s) not found:\n\n  " .
+            join("\n  ", @missing) .
+            "\n\nChecked PATH plus:\n  /bin\n  /usr/bin\n  /sbin\n  /usr/sbin\n  /usr/local/bin\n  /usr/local/sbin"
+        );
+    }
+}
+
+# ============================================================
+# ERROR WINDOWS
+# ============================================================
+
+sub show_error_and_exit {
+    my ($msg) = @_;
+
+    my $dialog = Gtk3::MessageDialog->new(
+        undef,
+        ['modal'],
+        'error',
+        'close',
+        $msg
+    );
+
+    $dialog->run;
+    $dialog->destroy;
+
+    exit 1;
+}
+
+sub show_error {
+    my ($msg) = @_;
+
+    my $dialog = Gtk3::MessageDialog->new(
+        undef,
+        ['modal'],
+        'error',
+        'close',
+        $msg
+    );
+
+    $dialog->run;
+    $dialog->destroy;
+}
+
+# ============================================================
+# SUDO COMMAND WRAPPER
+# ============================================================
+
+sub run_sudo_command {
+    my (@args) = @_;
+
+    system($CMD{'sudo'}, "-n", @args);
+
+    if ($? != 0) {
+        show_error(
+            "Command failed:\n\n  sudo -n " .
+            join(" ", @args) .
+            "\n\nSudo may not be authenticated, or the command may have failed."
+        );
+        return 0;
+    }
+
+    return 1;
+}
 
 # ============================================================
 # AUTHENTICATION
@@ -40,8 +152,7 @@ sub authenticate_sudo {
 
     return 0 if $response ne 'ok';
 
-    # Correct way to validate sudo password
-    open(my $sudo, "|-", "sudo", "-S", "-v") or return 0;
+    open(my $sudo, "|-", $CMD{'sudo'}, "-S", "-v") or return 0;
     print $sudo "$password\n";
     close($sudo);
 
@@ -69,11 +180,11 @@ sub apply_css {
 
         button:hover { background: #2a2a2a; }
 
-        .btn-connect   { background: #2e7d32; color: white; }
-        .btn-disconnect{ background: #c62828; color: white; }
-        .btn-help      { background: #3b3b3b; color: white; }
+        .btn-connect    { background: #2e7d32; color: white; }
+        .btn-disconnect { background: #c62828; color: white; }
+        .btn-help       { background: #3b3b3b; color: white; }
 
-        .btn-disabled  { background: #555; color: #aaa; }
+        .btn-disabled   { background: #555; color: #aaa; }
     };
 
     $provider->load_from_data($css);
@@ -93,19 +204,19 @@ sub get_profiles {
 
     my @list;
 
-    # Try direct directory read (works only if user can read /etc/wireguard)
     if (opendir(my $dh, "/etc/wireguard")) {
         while (my $file = readdir($dh)) {
             next unless $file =~ /\.conf$/;
             $file =~ s/\.conf$//;
             push @list, $file;
         }
+
         closedir($dh);
-        return @list if @list;
+        return sort @list if @list;
     }
 
-    # Fallback: sudo ls (works even if /etc/wireguard isn't readable by user)
-    open(my $fh, "-|", "sudo", "-n", "/bin/ls", "-1", "/etc/wireguard") or return ();
+    open(my $fh, "-|", $CMD{'sudo'}, "-n", $CMD{'ls'}, "/etc/wireguard")
+        or return ();
 
     while (<$fh>) {
         chomp;
@@ -115,7 +226,8 @@ sub get_profiles {
     }
 
     close $fh;
-    return @list;
+
+    return sort @list;
 }
 
 # ============================================================
@@ -126,7 +238,7 @@ sub get_active_interfaces {
 
     my %active;
 
-    open(my $fh, "-|", "sudo", "-n", "/usr/bin/wg", "show")
+    open(my $fh, "-|", $CMD{'sudo'}, "-n", $CMD{'wg'}, "show")
         or return ();
 
     while (<$fh>) {
@@ -136,12 +248,15 @@ sub get_active_interfaces {
     }
 
     close $fh;
+
     return %active;
 }
 
 sub is_profile_active {
     my ($profile) = @_;
+
     my %active = get_active_interfaces();
+
     return exists $active{$profile};
 }
 
@@ -150,10 +265,56 @@ sub is_profile_active {
 # ============================================================
 
 sub disconnect_all {
+
     my %active = get_active_interfaces();
+
     foreach my $iface (keys %active) {
-        system("sudo", "-n", "/usr/bin/wg-quick", "down", $iface);
+        run_sudo_command($CMD{'wg-quick'}, "down", $iface);
     }
+}
+
+# ============================================================
+# STATUS REFRESH
+# ============================================================
+
+sub refresh_status {
+
+    my %active = get_active_interfaces();
+
+    foreach my $profile (@profiles) {
+
+        next unless exists $widgets{$profile};
+
+        my $is_active = exists $active{$profile};
+
+        my $label      = $widgets{$profile}->{label};
+        my $connect    = $widgets{$profile}->{connect};
+        my $disconnect = $widgets{$profile}->{disconnect};
+
+        $connect->get_style_context->remove_class('btn-disabled');
+        $disconnect->get_style_context->remove_class('btn-disabled');
+
+        if ($is_active) {
+
+            $label->set_markup("<span foreground='#66ff66'><b>$profile</b></span>");
+
+            $connect->set_sensitive(FALSE);
+            $disconnect->set_sensitive(TRUE);
+
+            $connect->get_style_context->add_class('btn-disabled');
+
+        } else {
+
+            $label->set_markup("<span foreground='#ff5555'><b>$profile</b></span>");
+
+            $connect->set_sensitive(TRUE);
+            $disconnect->set_sensitive(FALSE);
+
+            $disconnect->get_style_context->add_class('btn-disabled');
+        }
+    }
+
+    return TRUE;
 }
 
 # ============================================================
@@ -200,22 +361,6 @@ sub show_help {
     $dialog->destroy;
 }
 
-sub show_error_and_exit {
-    my ($msg) = @_;
-
-    my $dialog = Gtk3::MessageDialog->new(
-        undef,
-        ['modal'],
-        'error',
-        'close',
-        $msg
-    );
-    $dialog->run;
-    $dialog->destroy;
-
-    exit 1;
-}
-
 # ============================================================
 # GUI
 # ============================================================
@@ -228,12 +373,12 @@ sub build_gui {
     $window->set_title('WireGuard Control');
     $window->set_border_width(14);
     $window->set_default_size(460, 280);
-    $window->signal_connect( destroy => sub { Gtk3->main_quit; });
+    $window->signal_connect(destroy => sub { Gtk3->main_quit; });
 
     my $vbox = Gtk3::Box->new('vertical', 10);
     $window->add($vbox);
 
-    my %widgets;
+    %widgets = ();
 
     foreach my $profile (@profiles) {
 
@@ -260,38 +405,41 @@ sub build_gui {
             disconnect => $disconnect,
         };
 
-        # CONNECT ACTION
         $connect->signal_connect(clicked => sub {
 
-            system("sudo", "-n", "/usr/bin/wg-quick", "up", $profile);
+            return unless run_sudo_command($CMD{'wg-quick'}, "up", $profile);
 
             my $attempts = 0;
+
             Glib::Timeout->add(500, sub {
                 $attempts++;
                 refresh_status();
+
                 return FALSE if is_profile_active($profile);
                 return FALSE if $attempts > 20;
+
                 return TRUE;
             });
         });
 
-        # DISCONNECT ACTION
         $disconnect->signal_connect(clicked => sub {
 
-            system("sudo", "-n", "/usr/bin/wg-quick", "down", $profile);
+            return unless run_sudo_command($CMD{'wg-quick'}, "down", $profile);
 
             my $attempts = 0;
+
             Glib::Timeout->add(500, sub {
                 $attempts++;
                 refresh_status();
+
                 return FALSE unless is_profile_active($profile);
                 return FALSE if $attempts > 20;
+
                 return TRUE;
             });
         });
     }
 
-    # Bottom row: HELP (left) + GLOBAL DISCONNECT (right)
     my $bottom_row = Gtk3::Box->new('horizontal', 10);
 
     my $help_button = Gtk3::Button->new('HELP');
@@ -305,68 +453,33 @@ sub build_gui {
 
     $vbox->pack_end($bottom_row, FALSE, FALSE, 2);
 
-    $help_button->signal_connect(clicked => sub { show_help(); });
+    $help_button->signal_connect(clicked => sub {
+        show_help();
+    });
 
     $global_disconnect->signal_connect(clicked => sub {
 
         disconnect_all();
 
         my $attempts = 0;
+
         Glib::Timeout->add(500, sub {
             $attempts++;
             refresh_status();
+
             my %active = get_active_interfaces();
+
             return FALSE unless keys %active;
             return FALSE if $attempts > 20;
+
             return TRUE;
         });
     });
 
-    # ============================================================
-    # STATUS REFRESH
-    # ============================================================
-
-    sub refresh_status {
-
-        my %active = get_active_interfaces();
-
-        foreach my $profile (@profiles) {
-
-            my $is_active = exists $active{$profile};
-
-            my $label = $widgets{$profile}->{label};
-            my $connect = $widgets{$profile}->{connect};
-            my $disconnect = $widgets{$profile}->{disconnect};
-
-            # Clear any prior disabled styling
-            $connect->get_style_context->remove_class('btn-disabled');
-            $disconnect->get_style_context->remove_class('btn-disabled');
-
-            if ($is_active) {
-
-                $label->set_markup("<span foreground='#66ff66'><b>$profile</b></span>");
-
-                $connect->set_sensitive(FALSE);
-                $disconnect->set_sensitive(TRUE);
-
-                $connect->get_style_context->add_class('btn-disabled');
-
-            } else {
-
-                $label->set_markup("<span foreground='#ff5555'><b>$profile</b></span>");
-
-                $connect->set_sensitive(TRUE);
-                $disconnect->set_sensitive(FALSE);
-
-                $disconnect->get_style_context->add_class('btn-disabled');
-            }
-        }
-
-        return TRUE;
-    }
-
     $window->show_all;
+
     refresh_status();
+
     Glib::Timeout->add(3000, \&refresh_status);
 }
 
@@ -374,12 +487,25 @@ sub build_gui {
 # MAIN
 # ============================================================
 
+detect_commands();
+
 exit 1 unless authenticate_sudo();
 
 @profiles = get_profiles();
+
 if (!@profiles) {
-    show_error_and_exit("No WireGuard .conf files found (or not readable).\n\nExpected in:\n  /etc/wireguard\n\nIf /etc/wireguard is not readable by your user,\nallow sudo for:\n  /bin/ls /etc/wireguard\n(or adjust directory permissions/group).");
+    show_error_and_exit(
+        "No WireGuard .conf files found, or /etc/wireguard could not be read.\n\n" .
+        "Expected files:\n  /etc/wireguard/wg*.conf\n\n" .
+        "The available WireGuard connection list is generated from whatever .conf files are in:\n  /etc/wireguard\n\n" .
+        "Detected command paths:\n" .
+        "  sudo:     $CMD{'sudo'}\n" .
+        "  ls:       $CMD{'ls'}\n" .
+        "  wg:       $CMD{'wg'}\n" .
+        "  wg-quick: $CMD{'wg-quick'}\n"
+    );
 }
 
 build_gui();
+
 Gtk3->main;
