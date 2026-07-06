@@ -1,6 +1,6 @@
 ============================================================
 WireGuard GTK UI
-Version 2.1
+Version 2.2
 ============================================================
 
 OVERVIEW
@@ -11,19 +11,24 @@ multiple WireGuard (.conf) files located in:
     /etc/wireguard
 
 The available WireGuard connection list shown in the GUI
-is automatically generated from any files matching:
+is automatically generated from files matching:
 
-    wg*.conf
+    *.conf
 
 found in:
 
     /etc/wireguard
 
-Each matching .conf file becomes an independent
-WireGuard interface.
+Each matching .conf file becomes an independent WireGuard
+profile in the interface.
 
-If you add or remove wg*.conf files, restart the program
-to refresh the list.
+If you add or remove .conf files, restart the program to
+refresh the list.
+
+On systems without a resolvconf executable, such as some
+Slackware installations, the program creates a temporary
+copy of the WireGuard config with Interface DNS lines removed.
+It does not modify /etc/resolvconf.
 
 
 ============================================================
@@ -43,7 +48,7 @@ For each profile:
 - Profile name is GREEN if active
 - Profile name is RED if inactive
 
-GLOBAL DISCONNECT stops ALL active WireGuard interfaces.
+GLOBAL DISCONNECT stops all active WireGuard interfaces.
 
 
 ============================================================
@@ -55,17 +60,23 @@ INSTALLATION
 You must have:
 
 - perl
-- libgtk3-perl (GTK3 bindings)
+- Gtk3 Perl module
+- Glib Perl module
+- File::Temp Perl module
 - wireguard-tools
 - iproute2
+- sudo
+- /usr/bin/env
+- ls
+- cat
 
 Debian/Ubuntu:
 
-    sudo apt install perl libgtk3-perl wireguard wireguard-tools
+    sudo apt install perl libgtk3-perl wireguard wireguard-tools iproute2 sudo coreutils
 
 Slackware:
 
-    slackpkg install perl gtk+3 wireguard-tools
+    slackpkg install perl gtk+3 wireguard-tools iproute2 sudo coreutils
 
 
 2) Script Placement
@@ -75,6 +86,7 @@ Place the following files in:
     ~/bin
 
 Files:
+
     wg-ui.pl
     wg-ui-help.txt
 
@@ -83,45 +95,46 @@ Make executable:
     chmod +x ~/bin/wg-ui.pl
 
 
-3) Sudo Requirements (MINIMAL)
+3) Sudo Requirements
 
 Edit sudoers safely using:
 
     sudo visudo
 
-Add:
+Add one line, replacing <YOUR_USER> with your login name:
 
-    youruser ALL=(root) /usr/bin/wg, /usr/bin/wg-quick, /bin/ls /etc/wireguard
+    <YOUR_USER> ALL=(root) /usr/bin/env PATH=* /usr/bin/ls /etc/wireguard, /usr/bin/env PATH=* /usr/bin/cat /etc/wireguard/*.conf, /usr/bin/env PATH=* /usr/bin/wg show, /usr/bin/env PATH=* /usr/bin/wg-quick up *, /usr/bin/env PATH=* /usr/bin/wg-quick down *
 
 This allows:
+
+- Listing configuration files in /etc/wireguard
+- Reading WireGuard config files when needed
 - Viewing active WireGuard interfaces
 - Bringing tunnels up
 - Bringing tunnels down
-- Listing configuration files in /etc/wireguard
 
-For security, do NOT use:
+The script prompts for your sudo password. Do not add NOPASSWD
+unless you intentionally want passwordless operation.
 
-    youruser ALL=(root) ALL
+For security, do not use:
 
-Do NOT use NOPASSWD if you want a password prompt.
+    <YOUR_USER> ALL=(root) ALL
 
 
 ============================================================
 SECURITY NOTE
 ============================================================
 
-This program executes:
+This program executes restricted sudo commands through:
 
-    sudo wg
-    sudo wg-quick up <profile>
-    sudo wg-quick down <profile>
+    sudo -A -p '' /usr/bin/env PATH=<admin-path> <command>
 
-Ensure you trust the configuration files in:
+The administrative PATH includes:
 
-    /etc/wireguard
+    /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
-Private keys remain protected by system permissions.
+This is required on systems where wg-quick runs helper commands
+such as sysctl by name, and those helpers live in /sbin or
+/usr/sbin.
 
-============================================================
-END
-============================================================
+The program does not overwrite /etc/resolvconf.
